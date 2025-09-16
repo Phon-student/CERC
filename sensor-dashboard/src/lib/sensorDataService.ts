@@ -32,11 +32,114 @@ class SensorDataService {
   private baseUrl = '/api/sensors';
 
   /**
+   * Get available buildings
+   */
+  async getAvailableBuildings(): Promise<string[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/buildings`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('API returned non-JSON response:', await response.text());
+        throw new Error('API returned non-JSON response');
+      }
+      
+      const result: ApiResponse<string[]> = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch available buildings');
+      }
+      
+      return result.data;
+    } catch (error) {
+      console.error('Error fetching available buildings:', error);
+      // Return default buildings if API fails
+      return [
+        'Blk 1', 'Blk 2', 'Blk 3', 'Blk 5', 'Blk 6', 'Blk 7', 'Blk 10', 'Blk 11', 
+        'Blk 14', 'Blk 15', 'Blk 16', 'Blk 18', 'Blk 19', 'Blk 20', 'Blk 22', 
+        'Blk 23', 'Blk 24', 'Blk 26', 'Blk 28', 'Blk 34'
+      ];
+    }
+  }
+
+  /**
+   * Get building statistics
+   */
+  async getBuildingStatistics(): Promise<{ building: string; sensorCount: number; anomalyRate: number }[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/statistics`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('Statistics API returned non-JSON response');
+        throw new Error('API returned non-JSON response');
+      }
+      
+      const result: ApiResponse<{ building: string; sensorCount: number; anomalyRate: number }[]> = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch statistics');
+      }
+      
+      return result.data;
+    } catch (error) {
+      console.error('Error fetching building statistics:', error);
+      // Return mock statistics based on building activity
+      return [
+        { building: 'Blk 22', sensorCount: 12, anomalyRate: 0.15 },
+        { building: 'Blk 15', sensorCount: 10, anomalyRate: 0.08 },
+        { building: 'Blk 19', sensorCount: 8, anomalyRate: 0.12 },
+        { building: 'Blk 11', sensorCount: 7, anomalyRate: 0.05 },
+        { building: 'Blk 16', sensorCount: 6, anomalyRate: 0.10 },
+        { building: 'Blk 10', sensorCount: 5, anomalyRate: 0.07 }
+      ];
+    }
+  }
+
+  /**
+   * Get most active buildings (by sensor count)
+   */
+  async getMostActiveBuildings(limit: number = 4): Promise<string[]> {
+    try {
+      const stats = await this.getBuildingStatistics();
+      return stats
+        .sort((a, b) => b.sensorCount - a.sensorCount) // Sort by sensor count descending
+        .slice(0, limit)
+        .map(stat => stat.building);
+    } catch (error) {
+      console.error('Error fetching most active buildings:', error);
+      return ['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11'];
+    }
+  }
+
+  /**
    * Get live sensor data
    */
-  async getLiveSensorData(): Promise<SensorReading[]> {
+  async getLiveSensorData(buildings?: string[]): Promise<SensorReading[]> {
     try {
-      const response = await fetch(`${this.baseUrl}?type=live&limit=4`);
+      const buildingsParam = buildings && buildings.length > 0 ? buildings.join(',') : undefined;
+      const url = `${this.baseUrl}?type=live&limit=20${buildingsParam ? `&buildings=${buildingsParam}` : ''}`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const responseText = await response.text();
+        console.error('API returned non-JSON response:', responseText);
+        throw new Error('API returned non-JSON response');
+      }
+      
       const result: ApiResponse<SensorReading[]> = await response.json();
       
       if (!result.success) {
@@ -49,7 +152,7 @@ class SensorDataService {
       }));
     } catch (error) {
       console.error('Error fetching live sensor data:', error);
-      return this.getFallbackData();
+      return this.getFallbackData(buildings);
     }
   }
 
@@ -222,49 +325,46 @@ class SensorDataService {
   /**
    * Fallback data if API fails
    */
-  private getFallbackData(): SensorReading[] {
-    return [
-      {
-        id: 'VAV-1',
-        name: 'Blk 22 Level 2 VAV',
-        building: 'Blk 22',
-        level: 2,
-        temperature: 24.5 + (Math.random() * 2 - 1),
-        timestamp: new Date(),
-        status: 'normal',
-        confidence: 0.95
-      },
-      {
-        id: 'VAV-2',
-        name: 'Blk 15 Level 5 VAV',
-        building: 'Blk 15',
-        level: 5,
-        temperature: 25.2 + (Math.random() * 2 - 1),
-        timestamp: new Date(),
-        status: 'normal',
-        confidence: 0.92
-      },
-      {
-        id: 'VAV-3',
-        name: 'Blk 19 Level 7 VAV',
-        building: 'Blk 19',
-        level: 7,
-        temperature: 26.8 + (Math.random() * 2 - 1),
-        timestamp: new Date(),
-        status: 'warning',
-        confidence: 0.88
-      },
-      {
-        id: 'VAV-4',
-        name: 'Blk 11 Level 6 VAV',
-        building: 'Blk 11',
-        level: 6,
-        temperature: 23.1 + (Math.random() * 2 - 1),
-        timestamp: new Date(),
-        status: 'anomaly',
-        confidence: 0.75
+  private getFallbackData(buildings?: string[]): SensorReading[] {
+    const defaultBuildings = buildings || ['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11'];
+    
+    const sensorData: SensorReading[] = [];
+    
+    defaultBuildings.forEach((building, buildingIndex) => {
+      // Generate 1-2 sensors per building
+      const sensorCount = Math.min(2, Math.floor(Math.random() * 2) + 1);
+      
+      for (let i = 0; i < sensorCount; i++) {
+        const sensorNumber = i + 1;
+        const baseTemp = 25.0;
+        const variation = (Math.random() - 0.5) * 4; // ±2°C variation
+        const temp = baseTemp + variation;
+        
+        let status: 'normal' | 'warning' | 'anomaly' = 'normal';
+        let confidence = 0.95;
+        
+        if (Math.abs(variation) > 2) {
+          status = 'anomaly';
+          confidence = 0.7 + (Math.random() * 0.2);
+        } else if (Math.abs(variation) > 1) {
+          status = 'warning';
+          confidence = 0.8 + (Math.random() * 0.15);
+        }
+        
+        sensorData.push({
+          id: `VAV-${building.replace('Blk ', '')}-${sensorNumber}`,
+          name: `${building} Level ${Math.floor(Math.random() * 8) + 2} VAV`,
+          building,
+          level: Math.floor(Math.random() * 8) + 2,
+          temperature: temp,
+          timestamp: new Date(),
+          status,
+          confidence
+        });
       }
-    ];
+    });
+    
+    return sensorData;
   }
 }
 

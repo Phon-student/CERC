@@ -2,15 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ThermometerSun, AlertTriangle, CheckCircle, Zap, TrendingUp, TrendingDown } from 'lucide-react';
-
-interface SensorReading {
-  id: string;
-  name: string;
-  temperature: number;
-  status: 'normal' | 'warning' | 'anomaly';
-  lastUpdated: Date;
-  confidence: number;
-}
+import { SensorReading } from '@/lib/sensorDataService';
 
 interface SensorCardProps {
   sensor: SensorReading;
