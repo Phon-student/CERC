@@ -1,0 +1,19 @@
+{
+  "models": {
+    "linear_regression": "./trained_models\\onnx\\linear_regression_20250916_132947.onnx",
+    "random_forest": "./trained_models\\onnx\\random_forest_20250916_132947.onnx"
+  },
+  "feature_columns": [
+    "Sensor_2_Temp",
+    "Sensor_3_Temp",
+    "Sensor_4_Temp"
+  ],
+  "input_shape": [
+    null,
+    3
+  ],
+  "reference_temperature": 25.0,
+  "timestamp": "20250916_132947",
+  "opset_version": 11,
+  "framework": "scikit-learn"
+}

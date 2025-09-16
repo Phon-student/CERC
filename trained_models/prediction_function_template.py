@@ -12,8 +12,8 @@ def predict_sensor_anomaly(sensor_readings, timestamp=None):
     from datetime import datetime
     
     # Load trained model
-    model = joblib.load('trained_models/ensemble_voting_20250911_103654.joblib')
-    preprocessing = joblib.load('trained_models/preprocessing_objects_20250911_103654.joblib')
+    model = joblib.load('trained_models/ensemble_voting_20250916_120605.joblib')
+    preprocessing = joblib.load('trained_models/preprocessing_objects_20250916_120605.joblib')
     
     # Feature engineering (implement based on training pipeline)
     # ... (feature extraction code would go here)

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import { Building2, Check, ChevronDown } from 'lucide-react';
 
 interface BuildingSelectorProps {
@@ -18,27 +18,36 @@ const BuildingSelector: React.FC<BuildingSelectorProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
 
-  const handleBuildingToggle = (building: string) => {
-    const updated = selectedBuildings.includes(building)
-      ? selectedBuildings.filter(b => b !== building)
-      : [...selectedBuildings, building];
+  const handleBuildingToggle = useCallback((building: string) => {
+    // Ensure selectedBuildings is an array
+    const currentSelected = Array.isArray(selectedBuildings) ? selectedBuildings : [];
+    const updated = currentSelected.includes(building)
+      ? currentSelected.filter(b => b !== building)
+      : [...currentSelected, building];
     
     onBuildingChange(updated);
-  };
+  }, [selectedBuildings, onBuildingChange]);
 
-  const handleSelectAll = () => {
-    if (selectedBuildings.length === availableBuildings.length) {
+  const handleSelectAll = useCallback(() => {
+    // Ensure availableBuildings is an array before using length
+    const buildings = Array.isArray(availableBuildings) ? availableBuildings : [];
+    if (selectedBuildings.length === buildings.length) {
       onBuildingChange([]);
     } else {
-      onBuildingChange([...availableBuildings]);
+      onBuildingChange([...buildings]);
     }
-  };
+  }, [availableBuildings, selectedBuildings, onBuildingChange]);
 
-  const sortedBuildings = [...availableBuildings].sort((a, b) => {
-    const numA = parseInt(a.replace('Blk ', ''));
-    const numB = parseInt(b.replace('Blk ', ''));
-    return numA - numB;
-  });
+  // Safely handle availableBuildings - ensure it's an array before spreading
+  const sortedBuildings = useMemo(() => 
+    Array.isArray(availableBuildings) 
+      ? [...availableBuildings].sort((a, b) => {
+          const numA = parseInt(a.replace('Blk ', ''));
+          const numB = parseInt(b.replace('Blk ', ''));
+          return numA - numB;
+        })
+      : [], [availableBuildings]
+  );
 
   return (
     <div className="relative">
@@ -88,7 +97,8 @@ const BuildingSelector: React.FC<BuildingSelectorProps> = ({
                   )}
                 </div>
                 <span className="text-sm font-medium text-gray-900 dark:text-white">
-                  {selectedBuildings.length === availableBuildings.length ? 'Deselect All' : 'Select All'}
+                  {(Array.isArray(selectedBuildings) ? selectedBuildings.length : 0) === 
+                   (Array.isArray(availableBuildings) ? availableBuildings.length : 0) ? 'Deselect All' : 'Select All'}
                 </span>
               </div>
             </div>
@@ -101,11 +111,11 @@ const BuildingSelector: React.FC<BuildingSelectorProps> = ({
                 className="flex items-center px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
               >
                 <div className={`w-4 h-4 border rounded mr-3 flex items-center justify-center ${
-                  selectedBuildings.includes(building)
+                  (Array.isArray(selectedBuildings) ? selectedBuildings.includes(building) : false)
                     ? 'bg-blue-600 border-blue-600'
                     : 'border-gray-300 dark:border-gray-600'
                 }`}>
-                  {selectedBuildings.includes(building) && (
+                  {(Array.isArray(selectedBuildings) ? selectedBuildings.includes(building) : false) && (
                     <Check className="h-3 w-3 text-white" />
                   )}
                 </div>
@@ -119,7 +129,7 @@ const BuildingSelector: React.FC<BuildingSelectorProps> = ({
       </div>
 
       {/* Selected Buildings Summary */}
-      {selectedBuildings.length > 0 && (
+      {Array.isArray(selectedBuildings) && selectedBuildings.length > 0 && (
         <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
           <p className="text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">
             Monitoring {selectedBuildings.length} building{selectedBuildings.length !== 1 ? 's' : ''}:
@@ -147,4 +157,4 @@ const BuildingSelector: React.FC<BuildingSelectorProps> = ({
   );
 };
 
-export default BuildingSelector;
+export default memo(BuildingSelector);

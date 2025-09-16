@@ -1,0 +1,26 @@
+{
+  "random_forest": {
+    "accuracy": 1.0,
+    "auc": 1.0
+  },
+  "gradient_boosting": {
+    "accuracy": 0.9988221436984688,
+    "auc": 0.9993794008831602
+  },
+  "svm": {
+    "accuracy": 0.944640753828033,
+    "auc": 0.9833393006325337
+  },
+  "logistic_regression": {
+    "accuracy": 1.0,
+    "auc": 1.0
+  },
+  "ensemble_voting": {
+    "accuracy": 0.9988221436984688,
+    "auc": 1.0
+  },
+  "autoencoder": {
+    "accuracy": 0.9210836277974087,
+    "auc": 0.9954409834109083
+  }
+}

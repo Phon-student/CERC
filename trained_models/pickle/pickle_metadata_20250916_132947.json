@@ -1,0 +1,15 @@
+{
+  "models": {
+    "linear_regression": "./trained_models\\pickle\\linear_regression_20250916_132947.pkl",
+    "random_forest": "./trained_models\\pickle\\random_forest_20250916_132947.pkl"
+  },
+  "feature_columns": [
+    "Sensor_2_Temp",
+    "Sensor_3_Temp",
+    "Sensor_4_Temp"
+  ],
+  "reference_temperature": 25.0,
+  "timestamp": "20250916_132947",
+  "format": "joblib_pickle",
+  "framework": "scikit-learn"
+}

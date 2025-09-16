@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
 function generateFallbackSensorData(buildings?: string[]) {
   const defaultBuildings = buildings || ['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11'];
   const sensorData: any[] = [];
+  let sensorIdCounter = 1; // Add a global counter for unique IDs
   
   defaultBuildings.forEach((building, buildingIndex) => {
     // Generate 1-2 sensors per building
@@ -75,6 +76,7 @@ function generateFallbackSensorData(buildings?: string[]) {
       const baseTemp = 25.0;
       const variation = (Math.random() - 0.5) * 4; // ±2°C variation
       const temp = baseTemp + variation;
+      const level = Math.floor(Math.random() * 8) + 2;
       
       let status: 'normal' | 'warning' | 'anomaly' = 'normal';
       let confidence = 0.95;
@@ -88,10 +90,10 @@ function generateFallbackSensorData(buildings?: string[]) {
       }
       
       sensorData.push({
-        id: `VAV-${building.replace('Blk ', '')}-${sensorNumber}`,
-        name: `${building} Level ${Math.floor(Math.random() * 8) + 2} VAV`,
+        id: `VAV-${building.replace('Blk ', '')}-L${level}-${sensorNumber}_${Date.now()}_${sensorIdCounter++}`,
+        name: `${building} Level ${level} VAV`,
         building,
-        level: Math.floor(Math.random() * 8) + 2,
+        level,
         temperature: temp,
         timestamp: new Date(),
         status,

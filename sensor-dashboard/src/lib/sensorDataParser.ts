@@ -244,13 +244,15 @@ export class SensorDataParser {
     const defaultBuildings = ['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11'];
     const targetBuildings = buildings?.length ? buildings : defaultBuildings;
     const readings: RealSensorReading[] = [];
+    let sensorIdCounter = 1; // Add a global counter for unique IDs
     
     targetBuildings.forEach((building) => {
       // Generate 2-3 sensors per building
       const sensorCount = Math.floor(Math.random() * 2) + 2; // 2-3 sensors
+      const availableLevels = [2, 5, 6, 7, 8];
       
       for (let i = 0; i < sensorCount; i++) {
-        const level = [2, 5, 6, 7, 8][i % 5];
+        const level = availableLevels[i % availableLevels.length];
         const baseTemp = 24.5 + (Math.random() * 3 - 1.5); // 23-26°C base range
         const deviation = Math.abs(baseTemp - 25.0);
         
@@ -266,7 +268,7 @@ export class SensorDataParser {
         }
 
         readings.push({
-          id: `VAV-${building.replace('Blk ', '')}-L${level}-${i + 1}`,
+          id: `VAV-${building.replace('Blk ', '')}-L${level}-${i + 1}_${Date.now()}_${sensorIdCounter++}`,
           name: `${building} Level ${level} VAV-${i + 1}`,
           building,
           level,

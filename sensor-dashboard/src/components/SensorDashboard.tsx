@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { 
@@ -49,6 +49,7 @@ interface BuildingStats {
 export default function SensorDashboard() {
   const searchParams = useSearchParams();
   const initialBuildings = searchParams.get('buildings')?.split(',') || [];
+  const isMountedRef = useRef(true);
   
   const [sensorData, setSensorData] = useState<SensorReading[]>([]);
   const [isLive, setIsLive] = useState(true);
@@ -58,48 +59,159 @@ export default function SensorDashboard() {
   const [availableBuildings, setAvailableBuildings] = useState<string[]>([]);
   const [buildingStats, setBuildingStats] = useState<BuildingStats[]>([]);
   const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[]>([]);
+  const [isClient, setIsClient] = useState(false);
+  const previousDataRef = useRef<SensorReading[]>([]);
+
+  // Fallback sensor data generator for offline mode
+  const generateFallbackSensorData = useCallback(() => {
+    const buildings = selectedBuildings.length > 0 ? selectedBuildings : ['Blk 1', 'Blk 2', 'Blk 3'];
+    const fallbackData: SensorReading[] = [];
+    let sensorIdCounter = 1;
+    
+    buildings.forEach((building) => {
+      const sensorCount = Math.floor(Math.random() * 2) + 2; // 2-3 sensors per building
+      
+      for (let i = 0; i < sensorCount; i++) {
+        const level = [2, 5, 6, 7, 8][i % 5];
+        const baseTemp = 24.5 + (Math.random() * 3 - 1.5);
+        const deviation = Math.abs(baseTemp - 25.0);
+        
+        let status: 'normal' | 'warning' | 'critical' = 'normal';
+        if (deviation > 2.5) status = 'critical';
+        else if (deviation > 1.5) status = 'warning';
+        
+        fallbackData.push({
+          id: `OFFLINE-${building.replace('Blk ', '')}-L${level}-${i + 1}-${sensorIdCounter++}`,
+          name: `${building} Level ${level} VAV-${i + 1}`,
+          building,
+          temperature: baseTemp,
+          humidity: 45 + Math.random() * 20,
+          status,
+          timestamp: new Date().toISOString(),
+          location: `Level ${level}`
+        });
+      }
+    });
+    
+    return fallbackData;
+  }, [selectedBuildings]);
+
+  // Helper function to compare sensor data for significant changes (excluding timestamp)
+  const hasDataChanged = useCallback((newData: SensorReading[], oldData: SensorReading[]) => {
+    if (newData.length !== oldData.length) return true;
+    
+    // Create a map for faster lookup
+    const oldSensorMap = new Map(oldData.map(sensor => [sensor.id, sensor]));
+    
+    for (const newSensor of newData) {
+      const oldSensor = oldSensorMap.get(newSensor.id);
+      
+      if (!oldSensor) return true; // New sensor
+      
+      // Check for significant changes (ignore minor fluctuations)
+      const tempDiff = Math.abs(newSensor.temperature - oldSensor.temperature);
+      const humidityDiff = Math.abs(newSensor.humidity - oldSensor.humidity);
+      
+      if (newSensor.building !== oldSensor.building ||
+          newSensor.status !== oldSensor.status ||
+          tempDiff >= 0.1 || // Only update for temp changes >= 0.1°C
+          humidityDiff >= 1) { // Only update for humidity changes >= 1%
+        return true;
+      }
+    }
+    
+    return false;
+  }, []);
+
+  // Fix hydration by ensuring client-side rendering
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Load available buildings
   useEffect(() => {
+    if (!isClient) return; // Only run on client
+    
     const loadBuildings = async () => {
       try {
-        const response = await fetch('/api/sensors/buildings');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch('/api/sensors/buildings', {
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
         if (response.ok) {
-          const buildings = await response.json();
-          setAvailableBuildings(buildings);
-          
-          // If no buildings selected, select first 4 by default
-          if (selectedBuildings.length === 0) {
-            setSelectedBuildings(buildings.slice(0, 4));
+          const result = await response.json();
+          // Extract buildings array from API response
+          const buildings = result.data || result;
+          // Ensure buildings is an array
+          if (Array.isArray(buildings)) {
+            setAvailableBuildings(buildings);
+            
+            // If no buildings selected, select first 4 by default
+            if (selectedBuildings.length === 0) {
+              setSelectedBuildings(buildings.slice(0, 4));
+            }
+          } else {
+            console.error('Buildings API did not return an array:', result);
+            // Use fallback buildings list
+            const fallbackBuildings = ['Blk 1', 'Blk 2', 'Blk 3', 'Blk 5', 'Blk 6', 'Blk 7'];
+            setAvailableBuildings(fallbackBuildings);
+            if (selectedBuildings.length === 0) {
+              setSelectedBuildings(fallbackBuildings.slice(0, 4));
+            }
           }
         }
       } catch (err) {
         console.error('Error loading buildings:', err);
+        // Use fallback buildings on error
+        const fallbackBuildings = ['Blk 1', 'Blk 2', 'Blk 3', 'Blk 5', 'Blk 6', 'Blk 7'];
+        setAvailableBuildings(fallbackBuildings);
+        if (selectedBuildings.length === 0) {
+          setSelectedBuildings(fallbackBuildings.slice(0, 4));
+        }
+        setAvailableBuildings([]); // Set empty array on error
       }
     };
 
     loadBuildings();
-  }, []);
+  }, [isClient]);
 
   // Load building statistics
   useEffect(() => {
+    if (!isClient) return; // Only run on client
+    
     const loadBuildingStats = async () => {
       try {
         const response = await fetch('/api/sensors/statistics');
         if (response.ok) {
-          const stats = await response.json();
-          setBuildingStats(stats);
+          const result = await response.json();
+          // Extract stats array from API response
+          const stats = result.data || result;
+          // Ensure stats is an array
+          if (Array.isArray(stats)) {
+            setBuildingStats(stats);
+          } else {
+            console.error('Statistics API did not return an array:', result);
+            setBuildingStats([]);
+          }
         }
       } catch (err) {
         console.error('Error loading building statistics:', err);
+        setBuildingStats([]); // Set empty array on error
       }
     };
 
     loadBuildingStats();
-  }, []);
+  }, [isClient]);
 
   // Generate historical data with actual sensor readings
   const generateHistoricalData = (sensors: SensorReading[]): HistoricalDataPoint[] => {
+    if (!isClient) return []; // Prevent server-side generation
+    
     const data: HistoricalDataPoint[] = [];
     const now = new Date();
     
@@ -115,9 +227,10 @@ export default function SensorDashboard() {
       const point: HistoricalDataPoint = { time: timeStr };
       
       // Add temperature data for each sensor
-      sensors.forEach(sensor => {
-        // Add some variation to make it look realistic
-        const variation = (Math.random() - 0.5) * 4; // ±2°C variation
+      sensors.forEach((sensor, sensorIndex) => {
+        // Use deterministic variation based on time and sensor index to avoid hydration issues
+        const seed = (time.getHours() + sensorIndex) * 0.1;
+        const variation = (Math.sin(seed) * 2); // ±2°C variation, deterministic
         point[`${sensor.building} - ${sensor.name}`] = Math.round((sensor.temperature + variation) * 10) / 10;
       });
       
@@ -129,6 +242,8 @@ export default function SensorDashboard() {
 
   // Update historical data with current readings
   const updateHistoricalDataWithCurrentReadings = (sensors: SensorReading[]) => {
+    if (!isClient) return; // Prevent server-side execution
+    
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-US', { 
       hour: '2-digit', 
@@ -156,63 +271,132 @@ export default function SensorDashboard() {
   };
 
   // Load sensor data
-  const loadSensorData = async () => {
-    if (selectedBuildings.length === 0) return;
+  const loadSensorData = useCallback(async (retryCount = 0) => {
+    if (selectedBuildings.length === 0 || !isMountedRef.current) return;
     
     try {
       setLoading(true);
       setError(null);
       
       const buildingsParam = selectedBuildings.join(',');
-      const response = await fetch(`/api/sensors?type=live&limit=20&buildings=${encodeURIComponent(buildingsParam)}`);
+      const apiUrl = `/api/sensors?type=live&limit=20&buildings=${encodeURIComponent(buildingsParam)}`;
+      
+      console.log('Fetching sensor data from:', apiUrl);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(apiUrl, {
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`API returned ${response.status}: ${response.statusText}`);
       }
       
-      const data = await response.json();
+      const result = await response.json();
+      console.log('API response received:', result);
       
-      if (Array.isArray(data)) {
-        setSensorData(data);
-        
-        // Generate or update historical data
-        if (historicalData.length === 0) {
-          const historical = generateHistoricalData(data);
-          setHistoricalData(historical);
-        } else if (isLive) {
-          updateHistoricalDataWithCurrentReadings(data);
+      // Extract sensor data array from API response
+      const data = result.data || result;
+      
+      if (Array.isArray(data) && isMountedRef.current) {
+        // Only update if data has actually changed
+        if (hasDataChanged(data, previousDataRef.current)) {
+          console.log('Sensor data has changed, updating...');
+          setSensorData(data);
+          previousDataRef.current = [...data]; // Store copy of new data
+          
+          // Generate or update historical data
+          if (historicalData.length === 0) {
+            const historical = generateHistoricalData(data);
+            setHistoricalData(historical);
+          } else if (isLive) {
+            updateHistoricalDataWithCurrentReadings(data);
+          }
+        } else {
+          console.log('Sensor data unchanged, skipping update...');
         }
       } else {
-        throw new Error('Invalid data format received');
+        console.error('Sensors API did not return an array:', result);
+        throw new Error('Invalid data format received from API');
       }
     } catch (err) {
-      console.error('Error loading sensor data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load sensor data');
+      console.error('Error loading sensor data (attempt ' + (retryCount + 1) + '):', err);
+      
+      // Retry logic for network errors
+      if (retryCount < 2 && (
+        err instanceof TypeError || 
+        (err instanceof Error && err.message.includes('fetch')) ||
+        (err instanceof Error && err.message.includes('AbortError'))
+      )) {
+        console.log(`Retrying in ${(retryCount + 1) * 2} seconds...`);
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            loadSensorData(retryCount + 1);
+          }
+        }, (retryCount + 1) * 2000);
+        return;
+      }
+      
+      if (isMountedRef.current) {
+        const errorMessage = err instanceof Error 
+          ? err.message 
+          : 'Failed to load sensor data. Please check your connection.';
+        setError(errorMessage);
+        
+        // If all retries failed, use fallback data to prevent complete failure
+        if (retryCount >= 2) {
+          console.log('Using fallback sensor data');
+          const fallbackData = generateFallbackSensorData();
+          setSensorData(fallbackData);
+          setError('Using offline mode - API unavailable');
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [selectedBuildings, historicalData.length, isLive]);
 
   // Load data when selected buildings change
   useEffect(() => {
+    if (!isClient) return; // Only run on client
     loadSensorData();
-  }, [selectedBuildings]);
+  }, [selectedBuildings, isClient, loadSensorData]);
 
   // Auto-update sensor data when live mode is enabled
   useEffect(() => {
+    if (!isClient) return; // Only run on client
+    
     let interval: NodeJS.Timeout;
     
     if (isLive && selectedBuildings.length > 0) {
       interval = setInterval(() => {
-        console.log('Auto-refreshing sensor data...');
-        loadSensorData(); // This will also update historical data
-      }, 5000); // Update every 5 seconds
+        if (isMountedRef.current) {
+          console.log('Auto-refreshing sensor data...');
+          loadSensorData(); // This will also update historical data
+        }
+      }, 10000); // Update every 10 seconds (reduced frequency)
     }
     
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isLive, selectedBuildings.length]); // Simplified dependencies
+  }, [isLive, selectedBuildings.length, isClient]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Helper function to get consistent colors for buildings
   const getBuildingColor = (building: string, index: number): string => {
@@ -232,16 +416,16 @@ export default function SensorDashboard() {
     return colors[buildingNum % colors.length] || colors[index % colors.length];
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     loadSensorData();
-  };
+  }, [loadSensorData]);
 
-  const handleBuildingSelectionChange = (buildings: string[]) => {
+  const handleBuildingSelectionChange = useCallback((buildings: string[]) => {
     setSelectedBuildings(buildings);
     setHistoricalData([]); // Reset historical data when buildings change
-  };
+  }, []);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     switch (status) {
       case 'normal':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
@@ -252,62 +436,79 @@ export default function SensorDashboard() {
       default:
         return <Activity className="h-4 w-4 text-gray-500" />;
     }
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch (status) {
       case 'normal':
-        return 'text-green-600 bg-green-50 border-green-200';
+        return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
       case 'warning':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+        return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
       case 'critical':
-        return 'text-red-600 bg-red-50 border-red-200';
+        return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
       default:
-        return 'text-gray-600 bg-gray-50 border-gray-200';
+        return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700';
     }
-  };
+  }, []);
 
-  const filteredSensors = sensorData.filter(sensor => 
-    selectedBuildings.length === 0 || selectedBuildings.includes(sensor.building)
+  const filteredSensors = useMemo(() => 
+    sensorData.filter(sensor => 
+      selectedBuildings.length === 0 || selectedBuildings.includes(sensor.building)
+    ), [sensorData, selectedBuildings]
   );
 
-  const totalSensors = filteredSensors.length;
-  const normalSensors = filteredSensors.filter(s => s.status === 'normal').length;
-  const warningSensors = filteredSensors.filter(s => s.status === 'warning').length;
-  const criticalSensors = filteredSensors.filter(s => s.status === 'critical').length;
-  const avgTemperature = totalSensors > 0 
-    ? (filteredSensors.reduce((sum, s) => sum + s.temperature, 0) / totalSensors).toFixed(1)
-    : '0';
+  const sensorStats = useMemo(() => {
+    const totalSensors = filteredSensors.length;
+    const normalSensors = filteredSensors.filter(s => s.status === 'normal').length;
+    const warningSensors = filteredSensors.filter(s => s.status === 'warning').length;
+    const criticalSensors = filteredSensors.filter(s => s.status === 'critical').length;
+    const avgTemperature = totalSensors > 0 
+      ? (filteredSensors.reduce((sum, s) => sum + s.temperature, 0) / totalSensors).toFixed(1)
+      : '0';
+
+    return {
+      totalSensors,
+      normalSensors,
+      warningSensors,
+      criticalSensors,
+      avgTemperature
+    };
+  }, [filteredSensors]);
 
   // Prepare chart data - only show sensors from selected buildings
-  const chartSensors = filteredSensors.slice(0, 8); // Limit to 8 sensors for readability
-  const chartLines = chartSensors.map((sensor, index) => {
-    const sensorKey = `${sensor.building} - ${sensor.name}`;
-    const color = getBuildingColor(sensor.building, index);
+  const chartData = useMemo(() => {
+    const chartSensors = filteredSensors.slice(0, 8); // Limit to 8 sensors for readability
+    const chartLines = chartSensors.map((sensor, index) => {
+      const sensorKey = `${sensor.building} - ${sensor.name}`;
+      const uniqueKey = `${sensorKey}-${sensor.id}-${index}`;
+      const color = getBuildingColor(sensor.building, index);
+      
+      return (
+        <Line
+          key={uniqueKey}
+          type="monotone"
+          dataKey={sensorKey}
+          stroke={color}
+          strokeWidth={2}
+          dot={false}
+          connectNulls={false}
+        />
+      );
+    });
     
-    return (
-      <Line
-        key={sensorKey}
-        type="monotone"
-        dataKey={sensorKey}
-        stroke={color}
-        strokeWidth={2}
-        dot={false}
-        connectNulls={false}
-      />
-    );
-  });
+    return { chartSensors, chartLines };
+  }, [filteredSensors]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
           <div className="mb-4 md:mb-0">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Building Temperature Monitoring
             </h1>
-            <p className="text-gray-600">
+            <p className="text-gray-600 dark:text-gray-300">
               Real-time sensor monitoring across multiple buildings
             </p>
           </div>
@@ -316,7 +517,7 @@ export default function SensorDashboard() {
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -326,8 +527,8 @@ export default function SensorDashboard() {
               onClick={() => setIsLive(!isLive)}
               className={`inline-flex items-center px-4 py-2 rounded-lg transition-colors ${
                 isLive 
-                  ? 'bg-green-600 text-white hover:bg-green-700' 
-                  : 'bg-gray-600 text-white hover:bg-gray-700'
+                  ? 'bg-green-600 dark:bg-green-500 text-white hover:bg-green-700 dark:hover:bg-green-600' 
+                  : 'bg-gray-600 dark:bg-gray-500 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
               }`}
             >
               <Zap className="h-4 w-4 mr-2" />
@@ -336,7 +537,7 @@ export default function SensorDashboard() {
 
             <Link
               href="/buildings"
-              className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              className="inline-flex items-center px-4 py-2 bg-indigo-600 dark:bg-indigo-500 text-white rounded-lg hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
             >
               <Building2 className="h-4 w-4 mr-2" />
               Buildings
@@ -349,56 +550,56 @@ export default function SensorDashboard() {
           <BuildingSelector
             availableBuildings={availableBuildings}
             selectedBuildings={selectedBuildings}
-            onSelectionChange={handleBuildingSelectionChange}
+            onBuildingChange={handleBuildingSelectionChange}
           />
         </div>
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Total Sensors</p>
-                <p className="text-3xl font-bold text-gray-900">{totalSensors}</p>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Sensors</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{sensorStats.totalSensors}</p>
               </div>
-              <div className="bg-blue-100 p-3 rounded-full">
-                <ThermometerSun className="h-6 w-6 text-blue-600" />
+              <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-full">
+                <ThermometerSun className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Average Temp</p>
-                <p className="text-3xl font-bold text-gray-900">{avgTemperature}°C</p>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Average Temp</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{sensorStats.avgTemperature}°C</p>
               </div>
-              <div className="bg-green-100 p-3 rounded-full">
-                <TrendingUp className="h-6 w-6 text-green-600" />
+              <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-full">
+                <TrendingUp className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Normal Status</p>
-                <p className="text-3xl font-bold text-green-600">{normalSensors}</p>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Normal Status</p>
+                <p className="text-3xl font-bold text-green-600 dark:text-green-400">{sensorStats.normalSensors}</p>
               </div>
-              <div className="bg-green-100 p-3 rounded-full">
-                <CheckCircle className="h-6 w-6 text-green-600" />
+              <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-full">
+                <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Alerts</p>
-                <p className="text-3xl font-bold text-red-600">{warningSensors + criticalSensors}</p>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Alerts</p>
+                <p className="text-3xl font-bold text-red-600 dark:text-red-400">{sensorStats.warningSensors + sensorStats.criticalSensors}</p>
               </div>
-              <div className="bg-red-100 p-3 rounded-full">
-                <Triangle className="h-6 w-6 text-red-600" />
+              <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-full">
+                <Triangle className="h-6 w-6 text-red-600 dark:text-red-400" />
               </div>
             </div>
           </div>
@@ -406,10 +607,10 @@ export default function SensorDashboard() {
 
         {/* Temperature Trend Chart */}
         {historicalData.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-8">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">Temperature Trends</h2>
-              <div className="flex items-center text-sm text-gray-500">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Temperature Trends</h2>
+              <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
                 <Clock className="h-4 w-4 mr-1" />
                 Last 24 hours
               </div>
@@ -435,7 +636,7 @@ export default function SensorDashboard() {
                     labelFormatter={(label) => `Time: ${label}`}
                   />
                   <Legend />
-                  {chartLines}
+                  {chartData.chartLines}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -444,10 +645,10 @@ export default function SensorDashboard() {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
             <div className="flex items-center">
-              <Triangle className="h-5 w-5 text-red-600 mr-2" />
-              <span className="text-red-800">{error}</span>
+              <Triangle className="h-5 w-5 text-red-600 dark:text-red-400 mr-2" />
+              <span className="text-red-800 dark:text-red-200">{error}</span>
             </div>
           </div>
         )}
@@ -455,8 +656,8 @@ export default function SensorDashboard() {
         {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
-            <RefreshCw className="h-8 w-8 animate-spin mx-auto text-blue-600 mb-4" />
-            <p className="text-gray-600">Loading sensor data...</p>
+            <RefreshCw className="h-8 w-8 animate-spin mx-auto text-blue-600 dark:text-blue-400 mb-4" />
+            <p className="text-gray-600 dark:text-gray-300">Loading sensor data...</p>
           </div>
         )}
 
@@ -465,7 +666,7 @@ export default function SensorDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredSensors.map((sensor) => (
               <SensorCard
-                key={sensor.id}
+                key={`${sensor.id || sensor.name}-${sensor.building || 'unknown'}`}
                 sensor={sensor}
                 getStatusIcon={getStatusIcon}
                 getStatusColor={getStatusColor}
@@ -477,9 +678,9 @@ export default function SensorDashboard() {
         {/* Empty State */}
         {!loading && !error && filteredSensors.length === 0 && (
           <div className="text-center py-12">
-            <ThermometerSun className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No sensors found</h3>
-            <p className="text-gray-600">
+            <ThermometerSun className="h-16 w-16 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No sensors found</h3>
+            <p className="text-gray-600 dark:text-gray-300">
               {selectedBuildings.length === 0 
                 ? 'Please select buildings to view sensor data'
                 : 'No sensors available for the selected buildings'
@@ -489,527 +690,10 @@ export default function SensorDashboard() {
         )}
 
         {/* Footer */}
-        <footer className="mt-12 text-center text-gray-500 text-sm">
-          <p>Last updated: {new Date().toLocaleString()}</p>
+        <footer className="mt-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+          <p>Last updated: {isClient ? new Date().toLocaleString() : '--'}</p>
         </footer>
       </div>
     </div>
   );
 }
-
-  const loadDefaultBuildings = async () => {
-    try {
-      const mostActive = await sensorDataService.getMostActiveBuildings(4);
-      setSelectedBuildings(mostActive);
-    } catch (error) {
-      console.error('Failed to load default buildings:', error);
-      // Set fallback buildings
-      setSelectedBuildings(['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11']);
-    }
-  };
-
-  const loadAvailableBuildings = async () => {
-    try {
-      const buildings = await sensorDataService.getAvailableBuildings();
-      setAvailableBuildings(buildings);
-    } catch (error) {
-      console.error('Failed to load available buildings:', error);
-      // Set default buildings if API fails
-      setAvailableBuildings(['Blk 1', 'Blk 2', 'Blk 3', 'Blk 5', 'Blk 6', 'Blk 7', 'Blk 10', 'Blk 11', 'Blk 14', 'Blk 15', 'Blk 16', 'Blk 18', 'Blk 19', 'Blk 20', 'Blk 22', 'Blk 23', 'Blk 24', 'Blk 26', 'Blk 28', 'Blk 34']);
-    }
-  };
-
-  const loadSensorData = async () => {
-    if (isLoadingData) {
-      console.log('Already loading data, skipping...');
-      return;
-    }
-    
-    try {
-      setIsLoadingData(true);
-      console.log('Loading sensor data for buildings:', selectedBuildings);
-      const data = await sensorDataService.getLiveSensorData(selectedBuildings.length > 0 ? selectedBuildings : undefined);
-      console.log('Received sensor data:', data.length, 'readings');
-      setSensorData(data);
-      setLastUpdate(new Date());
-      
-      // Update historical data with new readings
-      updateHistoricalDataWithCurrentReadings(data);
-    } catch (error) {
-      console.error('Failed to load sensor data:', error);
-      // Fallback to default data if API fails
-      loadFallbackData();
-    } finally {
-      setIsLoadingData(false);
-    }
-  };
-
-  const updateHistoricalDataWithCurrentReadings = (currentData: SensorReading[]) => {
-    if (currentData.length === 0) return;
-
-    // Update historical data with a new entry based on current readings
-    const newHistoricalEntry: HistoricalData = {
-      timestamp: new Date().toLocaleTimeString(),
-      sensor1: currentData[0]?.temperature || 25,
-      sensor2: currentData[1]?.temperature || 25,
-      sensor3: currentData[2]?.temperature || 25,
-      sensor4: currentData[3]?.temperature || 25,
-      anomalyCount: currentData.filter(s => s.status === 'anomaly').length
-    };
-
-    setHistoricalData(prev => [...prev.slice(-19), newHistoricalEntry]);
-  };
-
-  const loadFallbackData = () => {
-    const now = new Date();
-    const initialSensors: SensorReading[] = [
-      {
-        id: 'SNE22-1_VAV1-2-1_Temp',
-        name: 'SNE22-1 VAV Room 201',
-        temperature: 25.2,
-        status: 'normal',
-        lastUpdated: now,
-        timestamp: now,
-        confidence: 0.95
-      },
-      {
-        id: 'SNE22-1_VAV1-2-3_Temp',
-        name: 'SNE22-1 VAV Room 203',
-        temperature: 23.8,
-        status: 'warning',
-        lastUpdated: now,
-        timestamp: now,
-        confidence: 0.78
-      },
-      {
-        id: 'SNE22-1_VAV1-2-5_Temp',
-        name: 'SNE22-1 VAV Room 205',
-        temperature: 29.1,
-        status: 'anomaly',
-        lastUpdated: now,
-        timestamp: now,
-        confidence: 0.89
-      },
-      {
-        id: 'SNE22-1_VAV1-2-7_Temp',
-        name: 'SNE22-1 VAV Room 207',
-        temperature: 24.9,
-        status: 'normal',
-        lastUpdated: now,
-        timestamp: now,
-        confidence: 0.92
-      }
-    ];
-
-    setSensorData(initialSensors);
-    setLastUpdate(now);
-  };
-
-  // Auto-update sensor data when live mode is enabled
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (isLive && sensorData.length > 0 && selectedBuildings.length > 0) {
-      interval = setInterval(() => {
-        console.log('Auto-refreshing sensor data...');
-        loadSensorData();
-      }, 5000); // Update every 5 seconds
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isLive, selectedBuildings.length]); // Simplified dependencies
-
-  const generateSensorData = () => {
-    if (sensorData.length === 0) return;
-    
-    setSensorData(prevSensorData => {
-      const updatedSensors = prevSensorData.map(sensor => {
-        const baseTemp = 25.0;
-        const variation = (Math.random() - 0.5) * 6; // ±3°C variation
-        const newTemp = baseTemp + variation;
-        const confidence = Math.random() * 0.4 + 0.6; // 0.6 to 1.0
-
-        let status: 'normal' | 'warning' | 'anomaly' = 'normal';
-        if (Math.abs(variation) > 2) {
-          status = confidence > 0.8 ? 'anomaly' : 'warning';
-        } else if (Math.abs(variation) > 1) {
-          status = confidence > 0.7 ? 'warning' : 'normal';
-        }
-
-        return {
-          ...sensor,
-          temperature: newTemp,
-          status,
-          confidence,
-          lastUpdated: new Date()
-        };
-      });
-
-      setLastUpdate(new Date());
-
-      // Update historical data
-      const newHistoricalEntry: HistoricalData = {
-        timestamp: new Date().toLocaleTimeString(),
-        sensor1: updatedSensors[0]?.temperature || 25,
-        sensor2: updatedSensors[1]?.temperature || 25,
-        sensor3: updatedSensors[2]?.temperature || 25,
-        sensor4: updatedSensors[3]?.temperature || 25,
-        anomalyCount: updatedSensors.filter(s => s.status === 'anomaly').length
-      };
-
-      setHistoricalData(prev => [...prev.slice(-19), newHistoricalEntry]);
-      
-      return updatedSensors;
-    });
-  };
-
-  const generateHistoricalData = () => {
-    if (!isClient || sensorData.length === 0) return;
-    
-    console.log('Generating historical data for current sensors:', sensorData.length);
-    
-    const data: HistoricalData[] = [];
-    for (let i = 19; i >= 0; i--) {
-      const time = new Date();
-      time.setMinutes(time.getMinutes() - i * 5);
-      
-      // Use actual sensor data with some historical variation
-      const entry: HistoricalData = {
-        timestamp: time.toLocaleTimeString(),
-        sensor1: 25,
-        sensor2: 25,
-        sensor3: 25,
-        sensor4: 25,
-        anomalyCount: 0
-      };
-
-      // Map current sensors to chart lines
-      sensorData.slice(0, 4).forEach((sensor, index) => {
-        // Add some historical variation to current temperature
-        const variation = (Math.random() - 0.5) * 2; // ±1°C variation
-        const historicalTemp = sensor.temperature + variation;
-        
-        switch (index) {
-          case 0:
-            entry.sensor1 = historicalTemp;
-            break;
-          case 1:
-            entry.sensor2 = historicalTemp;
-            break;
-          case 2:
-            entry.sensor3 = historicalTemp;
-            break;
-          case 3:
-            entry.sensor4 = historicalTemp;
-            break;
-        }
-      });
-
-      // Count anomalies in current time frame
-      entry.anomalyCount = Math.floor(Math.random() * 2); // 0-1 anomalies per time period
-      
-      data.push(entry);
-    }
-    setHistoricalData(data);
-  };
-
-  // Calculate statistics
-  const stats = {
-    normalCount: sensorData.filter(s => s.status === 'normal').length,
-    warningCount: sensorData.filter(s => s.status === 'warning').length,
-    anomalyCount: sensorData.filter(s => s.status === 'anomaly').length,
-    avgConfidence: sensorData.length > 0 ? sensorData.reduce((sum, s) => sum + s.confidence, 0) / sensorData.length : 0
-  };
-
-  // Prevent hydration mismatch by not rendering during SSR
-  if (!isClient) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-        <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
-          <div className="flex items-center space-x-4">
-            <ThermometerSun className="h-8 w-8 text-blue-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Sensor Monitoring Dashboard
-              </h1>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                Loading dashboard...
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-4">
-            <ThermometerSun className="h-8 w-8 text-blue-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Sensor Monitoring Dashboard
-              </h1>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                Real-time temperature monitoring and anomaly detection
-                {selectedBuildings.length > 0 && (
-                  <span className="ml-2 text-blue-600 dark:text-blue-400">
-                    • Monitoring {selectedBuildings.length} building{selectedBuildings.length !== 1 ? 's' : ''}
-                  </span>
-                )}
-                <span className="ml-2">
-                  • <Link href="/buildings" className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
-                    View All Buildings
-                  </Link>
-                </span>
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex items-center space-x-4">
-            <BuildingSelector
-              availableBuildings={availableBuildings}
-              selectedBuildings={selectedBuildings}
-              onBuildingChange={setSelectedBuildings}
-            />
-            
-            <button
-              onClick={() => setIsLive(!isLive)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-md font-medium ${
-                isLive 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-              }`}
-            >
-              <Activity className={`h-4 w-4 ${isLive ? 'animate-pulse' : ''}`} />
-              <span>{isLive ? 'Live' : 'Paused'}</span>
-            </button>
-            
-            <Link
-              href="/buildings"
-              className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-            >
-              <Building2 className="h-4 w-4" />
-              <span>All Buildings</span>
-            </Link>
-            
-            <button
-              onClick={() => loadSensorData()}
-              disabled={isLoadingData}
-              className={`flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoadingData ? 'animate-spin' : ''}`} />
-              <span>{isLoadingData ? 'Loading...' : 'Refresh Data'}</span>
-            </button>
-            
-            <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-              <Settings className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-        
-        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-          Last updated: {lastUpdate ? lastUpdate.toLocaleString() : 'Loading...'}
-        </div>
-      </div>
-
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CheckCircle className="h-6 w-6 text-green-400" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                    Normal Sensors
-                  </dt>
-                  <dd className="text-lg font-medium text-gray-900 dark:text-white">
-                    {stats.normalCount}
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <AlertTriangle className="h-6 w-6 text-yellow-400" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                    Warning Sensors
-                  </dt>
-                  <dd className="text-lg font-medium text-gray-900 dark:text-white">
-                    {stats.warningCount}
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <Zap className="h-6 w-6 text-red-400" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                    Anomaly Sensors
-                  </dt>
-                  <dd className="text-lg font-medium text-gray-900 dark:text-white">
-                    {stats.anomalyCount}
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <TrendingUp className="h-6 w-6 text-blue-400" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                    Avg Confidence
-                  </dt>
-                  <dd className="text-lg font-medium text-gray-900 dark:text-white">
-                    {(stats.avgConfidence * 100).toFixed(1)}%
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Sensor Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {sensorData.map((sensor) => (
-          <SensorCard key={sensor.id} sensor={sensor} />
-        ))}
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {/* Temperature Trends */}
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Temperature Trends
-            </h3>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              {selectedBuildings.length > 0 ? (
-                <span>Showing: {selectedBuildings.slice(0, 4).join(', ')}</span>
-              ) : (
-                <span>Select buildings to view trends</span>
-              )}
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={historicalData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timestamp" />
-              <YAxis domain={['dataMin - 2', 'dataMax + 2']} />
-              <Tooltip formatter={(value: any, name: string) => [
-                `${parseFloat(value).toFixed(1)}°C`, 
-                name
-              ]} />
-              <Legend />
-              {sensorData.slice(0, 4).map((sensor, index) => {
-                const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
-                const dataKey = `sensor${index + 1}` as keyof HistoricalData;
-                return (
-                  <Line 
-                    key={sensor.id}
-                    type="monotone" 
-                    dataKey={dataKey}
-                    stroke={colors[index]} 
-                    name={sensor.name || `Sensor ${index + 1}`}
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                  />
-                );
-              })}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Anomaly Detection */}
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Anomaly Detection
-          </h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={historicalData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timestamp" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="anomalyCount" fill="#EF4444" name="Anomalies" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Recent Activity
-          </h3>
-        </div>
-        <div className="p-6">
-          <div className="space-y-4">
-            {sensorData.map((sensor, index) => (
-              <div key={sensor.id} className="flex items-center space-x-4">
-                <Clock className="h-5 w-5 text-gray-400" />
-                <div className="flex-1">
-                  <p className="text-sm text-gray-900 dark:text-white">
-                    <span className="font-medium">{sensor.name}</span> reported{' '}
-                    <span className={`font-medium ${
-                      sensor.status === 'anomaly' ? 'text-red-600' :
-                      sensor.status === 'warning' ? 'text-yellow-600' : 'text-green-600'
-                    }`}>
-                      {sensor.status}
-                    </span>{' '}
-                    status at {sensor.temperature.toFixed(1)}°C
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {sensor.lastUpdated ? sensor.lastUpdated.toLocaleString() : 'Unknown time'}
-                  </p>
-                </div>
-                <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  sensor.status === 'anomaly' ? 'bg-red-100 text-red-800' :
-                  sensor.status === 'warning' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
-                }`}>
-                  {(sensor.confidence * 100).toFixed(0)}%
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default SensorDashboard;
