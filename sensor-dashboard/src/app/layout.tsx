@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Navigation from "@/components/Navigation";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { ModelLoadingStatus } from "@/hooks/useModelPreload";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,6 +36,7 @@ export default function RootLayout({
         <ThemeProvider>
           <Navigation />
           <main>
+            <ModelLoadingStatus />
             {children}
           </main>
         </ThemeProvider>

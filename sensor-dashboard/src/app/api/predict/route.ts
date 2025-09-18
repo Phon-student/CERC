@@ -1,101 +1,122 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getModelService } from '@/lib/modelService';
 
 export async function POST(request: NextRequest) {
   try {
     const { sensorData, modelType = 'random_forest' } = await request.json();
 
     // Validate input
-    if (!sensorData || !Array.isArray(sensorData) || sensorData.length !== 4) {
+    if (!sensorData || !Array.isArray(sensorData)) {
       return NextResponse.json(
-        { error: 'Invalid sensor data. Expected array of 4 temperature readings.' },
+        { error: 'Invalid sensor data. Expected array of temperature readings.' },
         { status: 400 }
       );
     }
 
-    // Simulate model prediction (replace with actual model call)
-    const prediction = simulateModelPrediction(sensorData, modelType);
+    // Get model service
+    const modelService = getModelService();
+    
+    if (!modelService.isReady()) {
+      const status = modelService.getInitializationStatus();
+      return NextResponse.json(
+        { 
+          error: 'Models are still loading. Please try again in a moment.',
+          details: `Progress: ${status.loadingProgress}`,
+          initializationStatus: status
+        },
+        { status: 503 }
+      );
+    }
 
-    return NextResponse.json(prediction);
+    const metadata = modelService.getMetadata();
+    if (!metadata) {
+      return NextResponse.json(
+        { error: 'Model metadata not available.' },
+        { status: 500 }
+      );
+    }
+
+    // Validate sensor data length against model requirements
+    const expectedLength = metadata.input_shape[1];
+    if (sensorData.length !== expectedLength) {
+      return NextResponse.json(
+        { 
+          error: `Invalid sensor data length. Expected ${expectedLength} readings, got ${sensorData.length}.`,
+          expectedFeatures: metadata.feature_columns,
+          receivedLength: sensorData.length,
+          receivedData: sensorData,
+          hint: `Model expects: ${metadata.feature_columns.join(', ')}`
+        },
+        { status: 400 }
+      );
+    }
+
+    // Get prediction from actual ONNX model
+    const result = await modelService.predict(sensorData, modelType);
+    
+    if (!result.success) {
+      return NextResponse.json(
+        { error: 'Model prediction failed. Please check your input data.' },
+        { status: 500 }
+      );
+    }
+
+    // Calculate additional features for response
+    const temperatures = sensorData;
+    const referenceTemp = metadata.reference_temperature;
+    const deviations = temperatures.map(temp => Math.abs(temp - referenceTemp));
+    const maxDeviation = Math.max(...deviations);
+    const avgDeviation = deviations.reduce((a, b) => a + b, 0) / deviations.length;
+    const tempRange = Math.max(...temperatures) - Math.min(...temperatures);
+    const avgTemperature = temperatures.reduce((a, b) => a + b, 0) / temperatures.length;
+
+    // Convert regression prediction to classification
+    // Use both the model prediction AND input sensor analysis for better classification
+    const inputDeviations = temperatures.map(temp => Math.abs(temp - referenceTemp));
+    const maxInputDeviation = Math.max(...inputDeviations);
+    
+    // Use the larger deviation (either from model prediction or input sensors) for classification
+    const modelDeviation = Math.abs(result.prediction - referenceTemp);
+    const combinedDeviation = Math.max(modelDeviation, maxInputDeviation);
+    
+    const classification = modelService.classifyPrediction(
+      referenceTemp + (combinedDeviation * (result.prediction > referenceTemp ? 1 : -1)), 
+      referenceTemp
+    );
+    const response = {
+      success: true,
+      prediction: classification.classification,
+      confidence: classification.confidence,
+      probabilities: classification.probabilities,
+      rawPrediction: result.prediction,
+      features: {
+        temperatures,
+        maxDeviation,
+        avgDeviation,
+        tempRange,
+        avgTemperature,
+        referenceTemp
+      },
+      modelInfo: {
+        type: modelType,
+        availableModels: modelService.getAvailableModels(),
+        featureColumns: metadata.feature_columns,
+        framework: metadata.framework
+      },
+      timestamp: result.timestamp
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error('Prediction error:', error);
+    console.error('Prediction API error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
 }
 
-function simulateModelPrediction(sensorData: number[], modelType: string) {
-  const referenceTemp = 25.0;
-  
-  // Calculate features similar to your notebook
-  const temperatures = sensorData;
-  const deviations = temperatures.map(temp => Math.abs(temp - referenceTemp));
-  const maxDeviation = Math.max(...deviations);
-  const avgDeviation = deviations.reduce((a, b) => a + b, 0) / deviations.length;
-  const tempRange = Math.max(...temperatures) - Math.min(...temperatures);
-  
-  // Simulate model-specific predictions
-  let anomalyProb = 0;
-  let warningProb = 0;
-  
-  // Higher probability of anomaly for larger deviations
-  const deviationScore = maxDeviation / 5.0; // Normalize to 0-1
-  const rangeScore = tempRange / 10.0; // Normalize to 0-1
-  
-  switch (modelType) {
-    case 'random_forest':
-      anomalyProb = Math.min(0.99, Math.max(0.01, deviationScore * 0.8 + rangeScore * 0.2));
-      break;
-    case 'gradient_boosting':
-      anomalyProb = Math.min(0.98, Math.max(0.02, deviationScore * 0.75 + rangeScore * 0.25));
-      break;
-    case 'svm':
-      anomalyProb = Math.min(0.95, Math.max(0.05, deviationScore * 0.7 + rangeScore * 0.3));
-      break;
-    case 'autoencoder':
-      anomalyProb = Math.min(0.92, Math.max(0.08, deviationScore * 0.6 + rangeScore * 0.4));
-      break;
-    case 'ensemble':
-      anomalyProb = Math.min(0.999, Math.max(0.001, deviationScore * 0.85 + rangeScore * 0.15));
-      break;
-    default:
-      anomalyProb = Math.min(0.99, Math.max(0.01, deviationScore * 0.8 + rangeScore * 0.2));
-  }
-  
-  warningProb = Math.max(0, anomalyProb - 0.3);
-  const normalProb = 1 - anomalyProb - warningProb;
-  
-  // Determine prediction
-  let prediction: 'normal' | 'warning' | 'anomaly';
-  let confidence: number;
-  
-  if (anomalyProb > 0.7) {
-    prediction = 'anomaly';
-    confidence = anomalyProb;
-  } else if (anomalyProb > 0.5 || warningProb > 0.3) {
-    prediction = 'warning';
-    confidence = Math.max(anomalyProb, warningProb);
-  } else {
-    prediction = 'normal';
-    confidence = normalProb;
-  }
-  
-  return {
-    prediction,
-    confidence,
-    probabilities: {
-      normal: normalProb,
-      warning: warningProb,
-      anomaly: anomalyProb
-    },
-    features: {
-      maxDeviation,
-      avgDeviation,
-      tempRange,
-      temperatures
-    },
-    modelType,
-    timestamp: new Date().toISOString()
-  };
-}
+
