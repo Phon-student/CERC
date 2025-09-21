@@ -8,8 +8,35 @@ export async function GET(request: NextRequest) {
     const buildings = searchParams.get('buildings')?.split(',').filter(Boolean);
     const limit = parseInt(searchParams.get('limit') || '1000');
     const type = searchParams.get('type') || 'sample';
+    const dataSource = searchParams.get('source') || 'simulated'; // New parameter for real vs simulated data
 
-    console.log('Sensor API called with:', { building, buildings, limit, type });
+    console.log('Sensor API called with:', { building, buildings, limit, type, dataSource });
+
+    // If real data is requested, try to fetch from real sensor files
+    if (dataSource === 'real') {
+      try {
+        console.log('Attempting to fetch real sensor data...');
+        const realDataUrl = `${request.nextUrl.origin}/api/sensors/real?buildings=${buildings?.join(',') || ''}&type=${type}&limit=${limit}`;
+        
+        const realDataResponse = await fetch(realDataUrl);
+        
+        if (realDataResponse.ok) {
+          const realData = await realDataResponse.json();
+          console.log('Successfully fetched real sensor data:', realData);
+          
+          // Ensure the response has the expected format
+          if (realData && Array.isArray(realData.data)) {
+            return NextResponse.json(realData);
+          } else {
+            console.log('Real data response format invalid, falling back to simulated data');
+          }
+        } else {
+          console.log('Real data not available, falling back to simulated data');
+        }
+      } catch (error) {
+        console.log('Error fetching real data, falling back to simulated:', error);
+      }
+    }
 
     let data;
     
@@ -65,7 +92,10 @@ export async function GET(request: NextRequest) {
 function generateFallbackSensorData(buildings?: string[]) {
   const defaultBuildings = buildings || ['Blk 22', 'Blk 15', 'Blk 19', 'Blk 11'];
   const sensorData: any[] = [];
-  let sensorIdCounter = 1; // Add a global counter for unique IDs
+  
+  // Use a more robust ID generation to avoid duplicates
+  const timestamp = Date.now();
+  let sensorIdCounter = 1;
   
   defaultBuildings.forEach((building, buildingIndex) => {
     // Generate 1-2 sensors per building
@@ -89,9 +119,12 @@ function generateFallbackSensorData(buildings?: string[]) {
         confidence = 0.8 + (Math.random() * 0.15);
       }
       
+      // Create more unique IDs using building index, sensor number, and counter
+      const uniqueId = `VAV-${building.replace('Blk ', '')}-L${level}-${sensorNumber}-${buildingIndex}-${timestamp}-${sensorIdCounter++}`;
+      
       sensorData.push({
-        id: `VAV-${building.replace('Blk ', '')}-L${level}-${sensorNumber}_${Date.now()}_${sensorIdCounter++}`,
-        name: `${building} Level ${level} VAV`,
+        id: uniqueId,
+        name: `${building} Level ${level} VAV-${sensorNumber}`,
         building,
         level,
         temperature: temp,

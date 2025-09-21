@@ -29,6 +29,7 @@ interface SensorReading {
   timestamp: string;
   building: string;
   location: string;
+  confidence?: number; // For ML predictions
 }
 
 interface HistoricalDataPoint {
@@ -58,10 +59,12 @@ export default function SensorDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [selectedBuildings, setSelectedBuildings] = useState<string[]>(initialBuildings);
   const [availableBuildings, setAvailableBuildings] = useState<string[]>([]);
+  const [dataSource, setDataSource] = useState<'real' | 'simulated'>('simulated'); // New state for data source
   const [buildingStats, setBuildingStats] = useState<BuildingStats[]>([]);
   const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[]>([]);
   const [isClient, setIsClient] = useState(false);
   const previousDataRef = useRef<SensorReading[]>([]);
+  const dataSourceRef = useRef<'real' | 'simulated'>('simulated');
 
   // Fallback sensor data generator for offline mode
   const generateFallbackSensorData = useCallback(() => {
@@ -128,6 +131,11 @@ export default function SensorDashboard() {
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  // Keep dataSourceRef in sync with dataSource state
+  useEffect(() => {
+    dataSourceRef.current = dataSource;
+  }, [dataSource]);
 
   // Load available buildings
   useEffect(() => {
@@ -271,30 +279,118 @@ export default function SensorDashboard() {
     });
   };
 
+  // Function to process all sensor data with ML predictions in batch
+  const processSensorDataWithMLPredictions = async (sensors: SensorReading[]): Promise<SensorReading[]> => {
+    console.log(`Processing ML predictions for ${sensors.length} sensors...`);
+    
+    // Create an array of prediction promises
+    const predictionPromises = sensors.map(async (sensor) => {
+      try {
+        // Check if sensor data is valid before making request
+        if (!sensor.temperature || isNaN(sensor.temperature) || sensor.temperature <= 0 || sensor.temperature > 60) {
+          return sensor; // Return original sensor if invalid
+        }
+        
+        // Prepare sensor data - flexible input (can be 1 to N sensors)
+        const sensorData = [sensor.temperature];
+        
+        // Add humidity-derived temperature if available
+        if (sensor.humidity && sensor.humidity > 0 && sensor.humidity <= 100) {
+          const tempFromHumidity = 25.0 + (sensor.humidity - 50) * 0.1;
+          sensorData.push(tempFromHumidity);
+        }
+        
+        // Add synthetic nearby sensors for better analysis
+        const syntheticSensor2 = sensor.temperature + (Math.random() - 0.5) * 0.3;
+        const syntheticSensor3 = sensor.temperature + (Math.random() - 0.5) * 0.4;
+        sensorData.push(syntheticSensor2, syntheticSensor3);
+
+        const requestBody = {
+          sensorData,
+          sensorId: sensor.id || 'unknown',
+          sensorName: sensor.name || 'Unknown Sensor'
+        };
+
+        const response = await fetch('/api/predict-flexible', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          return {
+            ...sensor,
+            status: result.prediction || sensor.status,
+            confidence: result.confidence || 0
+          };
+        } else {
+          console.warn(`ML prediction failed for sensor ${sensor.id}:`, response.status);
+          return sensor; // Return original sensor on API error
+        }
+      } catch (error) {
+        console.warn(`ML prediction error for sensor ${sensor.id}:`, error);
+        return sensor; // Return original sensor on error
+      }
+    });
+    
+    // Wait for all predictions to complete
+    const processedSensors = await Promise.all(predictionPromises);
+    console.log(`Completed ML predictions for ${processedSensors.length} sensors`);
+    
+    return processedSensors;
+  };
+
   // Load sensor data
   const loadSensorData = useCallback(async (retryCount = 0) => {
-    if (selectedBuildings.length === 0 || !isMountedRef.current) return;
+    // For simulated data, we need buildings selected; for real data, we can get available buildings from the API
+    const currentDataSource = dataSourceRef.current;
+    if (currentDataSource === 'simulated' && selectedBuildings.length === 0) return;
+    if (!isMountedRef.current) return;
     
     try {
       setLoading(true);
       setError(null);
       
       const buildingsParam = selectedBuildings.join(',');
-      const apiUrl = `/api/sensors?type=live&limit=20&buildings=${encodeURIComponent(buildingsParam)}`;
+      const apiUrl = `/api/sensors?type=live&limit=20&buildings=${encodeURIComponent(buildingsParam)}&source=${currentDataSource}`;
       
-      console.log('Fetching sensor data from:', apiUrl);
+      console.log('Fetching sensor data from:', apiUrl, `(${currentDataSource} data)`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for real data
       
-      const response = await fetch(apiUrl, {
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      let response;
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          response = await fetch(apiUrl, {
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          break; // Success, exit retry loop
+        } catch (fetchError) {
+          retryCount++;
+          if (retryCount <= maxRetries) {
+            console.log(`Fetch attempt ${retryCount} failed, retrying in 2 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+          } else {
+            throw fetchError; // Re-throw error after all retries
+          }
+        }
+      }
       
       clearTimeout(timeoutId);
+      
+      if (!response) {
+        throw new Error('Failed to get response after retries');
+      }
       
       if (!response.ok) {
         throw new Error(`API returned ${response.status}: ${response.statusText}`);
@@ -309,16 +405,20 @@ export default function SensorDashboard() {
       if (Array.isArray(data) && isMountedRef.current) {
         // Only update if data has actually changed
         if (hasDataChanged(data, previousDataRef.current)) {
-          console.log('Sensor data has changed, updating...');
-          setSensorData(data);
-          previousDataRef.current = [...data]; // Store copy of new data
+          console.log('Sensor data has changed, processing ML predictions...');
+          
+          // Process ML predictions for all sensors before updating UI
+          const processedData = await processSensorDataWithMLPredictions(data);
+          
+          setSensorData(processedData);
+          previousDataRef.current = [...processedData]; // Store copy of new data
           
           // Generate or update historical data
           if (historicalData.length === 0) {
-            const historical = generateHistoricalData(data);
+            const historical = generateHistoricalData(processedData);
             setHistoricalData(historical);
           } else if (isLive) {
-            updateHistoricalDataWithCurrentReadings(data);
+            updateHistoricalDataWithCurrentReadings(processedData);
           }
         } else {
           console.log('Sensor data unchanged, skipping update...');
@@ -328,37 +428,57 @@ export default function SensorDashboard() {
         throw new Error('Invalid data format received from API');
       }
     } catch (err) {
-      console.error('Error loading sensor data (attempt ' + (retryCount + 1) + '):', err);
+      if (!isMountedRef.current) return;
       
-      // Retry logic for network errors
-      if (retryCount < 2 && (
-        err instanceof TypeError || 
-        (err instanceof Error && err.message.includes('fetch')) ||
-        (err instanceof Error && err.message.includes('AbortError'))
-      )) {
-        console.log(`Retrying in ${(retryCount + 1) * 2} seconds...`);
-        setTimeout(() => {
-          if (isMountedRef.current) {
-            loadSensorData(retryCount + 1);
-          }
-        }, (retryCount + 1) * 2000);
-        return;
+      console.error('Error loading sensor data:', err);
+      
+      // More detailed error logging
+      if (err instanceof Error) {
+        console.error('Error details:', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack?.substring(0, 500) + '...' // Truncate stack for readability
+        });
       }
       
-      if (isMountedRef.current) {
-        const errorMessage = err instanceof Error 
-          ? err.message 
-          : 'Failed to load sensor data. Please check your connection.';
-        setError(errorMessage);
-        
-        // If all retries failed, use fallback data to prevent complete failure
-        if (retryCount >= 2) {
-          console.log('Using fallback sensor data');
-          const fallbackData = generateFallbackSensorData();
-          setSensorData(fallbackData);
-          setError('Using offline mode - API unavailable');
+      // Special handling for abort errors when using real data
+      if (err instanceof Error && err.name === 'AbortError' && currentDataSource === 'real') {
+        console.log('Real data request timed out (60s), falling back to simulated data');
+        try {
+          // Try to fetch simulated data as fallback
+          const fallbackUrl = `/api/sensors?type=live&limit=20&buildings=${encodeURIComponent(selectedBuildings.join(','))}&source=simulated`;
+          console.log('Attempting fallback to simulated data:', fallbackUrl);
+          const fallbackResponse = await fetch(fallbackUrl);
+          if (fallbackResponse.ok) {
+            const fallbackResult = await fallbackResponse.json();
+            const fallbackData = fallbackResult.data || fallbackResult;
+            if (Array.isArray(fallbackData) && isMountedRef.current) {
+              setSensorData(fallbackData);
+              setError('Real data timeout (60s) - using simulated data');
+              return;
+            }
+          }
+        } catch (fallbackErr) {
+          console.error('Fallback to simulated data also failed:', fallbackErr);
         }
       }
+      
+      // Handle specific error types with better messages
+      let errorMessage = 'Failed to load sensor data';
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        errorMessage = 'Network error: Unable to connect to sensor API';
+      } else if (err instanceof Error && err.name === 'AbortError') {
+        errorMessage = 'Request timeout: Sensor data loading took too long (>60s)';
+      } else if (err instanceof Error) {
+        errorMessage = `Sensor data error: ${err.message}`;
+      }
+      
+      setError(errorMessage);
+      
+      // Use fallback data to prevent complete failure
+      console.log('Using fallback sensor data due to error');
+      const fallbackData = generateFallbackSensorData();
+      setSensorData(fallbackData);
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
@@ -366,11 +486,17 @@ export default function SensorDashboard() {
     }
   }, [selectedBuildings, historicalData.length, isLive]);
 
-  // Load data when selected buildings change
+  // Load data when selected buildings change or data source changes
   useEffect(() => {
     if (!isClient) return; // Only run on client
     loadSensorData();
   }, [selectedBuildings, isClient, loadSensorData]);
+
+  // Trigger reload when data source changes
+  useEffect(() => {
+    if (!isClient) return;
+    loadSensorData();
+  }, [dataSource, isClient, loadSensorData]);
 
   // Auto-update sensor data when live mode is enabled
   useEffect(() => {
@@ -390,7 +516,7 @@ export default function SensorDashboard() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isLive, selectedBuildings.length, isClient]);
+  }, [isLive, selectedBuildings.length, isClient, loadSensorData]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -476,9 +602,9 @@ export default function SensorDashboard() {
     };
   }, [filteredSensors]);
 
-  // Prepare chart data - only show sensors from selected buildings
+  // Prepare chart data - show all sensors from selected buildings
   const chartData = useMemo(() => {
-    const chartSensors = filteredSensors.slice(0, 8); // Limit to 8 sensors for readability
+    const chartSensors = filteredSensors; // Show all sensors, no artificial limit
     const chartLines = chartSensors.map((sensor, index) => {
       const sensorKey = `${sensor.building} - ${sensor.name}`;
       const uniqueKey = `${sensorKey}-${sensor.id}-${index}`;
@@ -543,6 +669,32 @@ export default function SensorDashboard() {
               <Building2 className="h-4 w-4 mr-2" />
               Buildings
             </Link>
+          </div>
+        </div>
+
+        {/* Data Source Selector */}
+        <div className="mb-6">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Data Source</h3>
+              <div className="flex items-center space-x-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Source:</label>
+                <select
+                  value={dataSource}
+                  onChange={(e) => setDataSource(e.target.value as 'simulated' | 'real')}
+                  className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="simulated">Simulated Data</option>
+                  <option value="real">Real Excel Data</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+              {dataSource === 'real' 
+                ? 'Reading temperature data from Excel files in Sensor_data/VAV Room Temp folder'
+                : 'Using simulated sensor data for demonstration purposes'
+              }
+            </p>
           </div>
         </div>
 
@@ -679,9 +831,9 @@ export default function SensorDashboard() {
         {/* Sensor Grid */}
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredSensors.map((sensor) => (
+            {filteredSensors.map((sensor, index) => (
               <SensorCard
-                key={`${sensor.id || sensor.name}-${sensor.building || 'unknown'}`}
+                key={`${sensor.id || sensor.name}-${sensor.building || 'unknown'}-${index}-${sensor.timestamp || Date.now()}`}
                 sensor={sensor}
                 getStatusIcon={getStatusIcon}
                 getStatusColor={getStatusColor}

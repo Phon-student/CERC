@@ -1,0 +1,34 @@
+{
+  "timestamp": "2025-09-21T11:14:39.596380",
+  "sensors_analyzed": [],
+  "detection_methods": [],
+  "summary": {
+    "error": "'ComprehensiveDriftDetector' object has no attribute 'generate_comprehensive_report'"
+  },
+  "config": {
+    "sequence_lengths": [
+      12,
+      24,
+      48
+    ],
+    "max_files_initial": 5,
+    "max_files_full": null,
+    "model_epochs": 25,
+    "model_patience": 10,
+    "batch_size": 64,
+    "reference_temperature": 25.0,
+    "drift_thresholds": {
+      "prediction_error": 2.0,
+      "temperature_deviation": 3.0,
+      "trend_change": 0.5,
+      "correlation_drop": 0.3
+    },
+    "save_models": true,
+    "model_save_path": "trained_models/",
+    "report_save_path": "drift_reports/",
+    "min_data_points": 100,
+    "max_memory_usage_gb": 8,
+    "timeout_minutes": 60
+  },
+  "optimal_sequence_length": 12
+}

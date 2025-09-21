@@ -3,7 +3,37 @@ import { flexibleModelService } from '@/lib/flexibleModelService';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    // Check if request has a body
+    const contentLength = request.headers.get('content-length');
+    if (!contentLength || contentLength === '0') {
+      return NextResponse.json(
+        { 
+          error: 'Empty request body. Please provide sensor data.',
+          expected: {
+            sensorData: 'Array of temperature readings',
+            sensorId: 'Optional sensor ID',
+            sensorName: 'Optional sensor name'
+          }
+        },
+        { status: 400 }
+      );
+    }
+
+    // Safely parse JSON with better error handling
+    let body;
+    try {
+      body = await request.json();
+    } catch (jsonError) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid JSON format in request body.',
+          details: jsonError instanceof Error ? jsonError.message : 'JSON parsing failed',
+          tip: 'Ensure your request body contains valid JSON with sensorData array'
+        },
+        { status: 400 }
+      );
+    }
+
     const { sensorData, sensorId, sensorName } = body;
 
     // Validate input - now supports variable length arrays

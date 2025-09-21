@@ -14,6 +14,7 @@ interface SensorCardProps {
     timestamp: string;
     building: string;
     location: string;
+    confidence?: number; // Add confidence from ML predictions
   };
   getStatusIcon?: (status: string) => React.ReactNode;
   getStatusColor?: (status: string) => string;
@@ -23,86 +24,14 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
   const [isClient, setIsClient] = useState(false);
   const [displayTemp, setDisplayTemp] = useState(sensor.temperature);
   const [previousTemp, setPreviousTemp] = useState(sensor.temperature);
-  const [prediction, setPrediction] = useState<{
-    status: string;
-    confidence: number;
-    isLoading: boolean;
-    error?: string;
-  }>({
-    status: sensor.status,
-    confidence: 0,
-    isLoading: false
-  });
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // Call ML prediction API for this sensor
-  const getMlPrediction = useCallback(async () => {
-    if (!isClient) return;
-    
-    setPrediction(prev => ({ ...prev, isLoading: true, error: undefined }));
-    
-    try {
-      // Prepare sensor data - flexible input (can be 1 to N sensors)
-      // For individual sensor cards, we'll send the sensor reading plus some synthetic nearby readings
-      const sensorData = [
-        sensor.temperature  // Primary sensor reading
-      ];
-      
-      // If we have humidity, add it as a second "temperature" reading for richer analysis
-      if (sensor.humidity && sensor.humidity > 0) {
-        // Convert humidity to a temperature-like reading for analysis
-        const tempFromHumidity = 25.0 + (sensor.humidity - 50) * 0.1; // Rough correlation
-        sensorData.push(tempFromHumidity);
-      }
-      
-      // Add some synthetic nearby sensors based on the main reading (for better model performance)
-      const syntheticSensor2 = sensor.temperature + (Math.random() - 0.5) * 0.3; // ±0.15°C
-      const syntheticSensor3 = sensor.temperature + (Math.random() - 0.5) * 0.4; // ±0.2°C
-      sensorData.push(syntheticSensor2, syntheticSensor3);
-
-      const response = await fetch('/api/predict-flexible', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sensorData,
-          sensorId: sensor.id,
-          sensorName: sensor.name
-        }),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        setPrediction({
-          status: result.prediction || sensor.status,
-          confidence: result.confidence || 0,
-          isLoading: false
-        });
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Prediction API error: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Error getting ML prediction:', error);
-      setPrediction({
-        status: sensor.status, // Fallback to original status
-        confidence: 0,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Prediction failed'
-      });
-    }
-  }, [sensor.temperature, sensor.humidity, sensor.id, sensor.name, sensor.status, isClient]);
-
-  // Get ML prediction when sensor data changes
-  useEffect(() => {
-    if (isClient && sensor.temperature !== undefined) {
-      getMlPrediction();
-    }
-  }, [sensor.temperature, isClient, getMlPrediction]);
+  // Use status and confidence from sensor data (processed by dashboard)
+  const status = sensor.status;
+  const confidence = sensor.confidence || 0;
 
   // Animate temperature changes for smooth transitions
   useEffect(() => {
@@ -135,7 +64,7 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
   }, [sensor.temperature, previousTemp, displayTemp]);
 
   const getStatusIcon = useMemo(() => {
-    const status = prediction.status; // Use ML prediction status
+    const status = sensor.status; // Use sensor status
     switch (status) {
       case 'normal':
         return <CheckCircle className="h-5 w-5 text-green-500" />;
@@ -146,10 +75,10 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
       default:
         return <CheckCircle className="h-5 w-5 text-gray-500" />;
     }
-  }, [prediction.status]);
+  }, [sensor.status]);
 
   const getStatusColor = useMemo(() => {
-    const status = prediction.status; // Use ML prediction status
+    const status = sensor.status; // Use sensor status
     switch (status) {
       case 'normal':
         return 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20';
@@ -160,7 +89,7 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
       default:
         return 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800';
     }
-  }, [prediction.status]);
+  }, [sensor.status]);
 
   const temperatureStatus = useMemo(() => {
     const referenceTemp = 25.0;
@@ -219,13 +148,13 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className={`px-2 py-1 rounded-full font-medium ${
-              prediction.status === 'normal' 
+              status === 'normal' 
                 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                : prediction.status === 'warning' 
+                : status === 'warning' 
                 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                 : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
             }`}>
-              {prediction.isLoading ? 'ANALYZING...' : prediction.status.toUpperCase()}
+              {status.toUpperCase()}
             </span>
             <span className="text-gray-500 dark:text-gray-400">
               {sensor.building}
@@ -237,23 +166,17 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
             <div className="flex items-center space-x-1">
               <Zap className="h-3 w-3 text-blue-500" />
               <span className="text-gray-600 dark:text-gray-400">
-                {prediction.isLoading ? 'Processing...' : 'ML Confidence:'}
+                ML Confidence:
               </span>
             </div>
             <span className={`font-medium ${
-              prediction.confidence > 70 ? 'text-green-600 dark:text-green-400' :
-              prediction.confidence > 50 ? 'text-yellow-600 dark:text-yellow-400' :
+              confidence > 70 ? 'text-green-600 dark:text-green-400' :
+              confidence > 50 ? 'text-yellow-600 dark:text-yellow-400' :
               'text-red-600 dark:text-red-400'
             }`}>
-              {prediction.isLoading ? '...' : `${prediction.confidence.toFixed(1)}%`}
+              {confidence.toFixed(1)}%
             </span>
           </div>
-          
-          {prediction.error && (
-            <div className="text-xs text-red-500 dark:text-red-400">
-              ⚠️ {prediction.error}
-            </div>
-          )}
         </div>
 
         {/* Last Updated */}
@@ -265,9 +188,9 @@ const SensorCard: React.FC<SensorCardProps> = ({ sensor }) => {
         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
           <div 
             className={`h-2 rounded-full transition-all duration-700 ease-in-out transform ${
-              prediction.status === 'normal' 
+              status === 'normal' 
                 ? 'bg-gradient-to-r from-green-400 to-green-500' 
-                : prediction.status === 'warning' 
+                : status === 'warning' 
                 ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' 
                 : 'bg-gradient-to-r from-red-400 to-red-500'
             }`}
