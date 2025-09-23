@@ -1,0 +1,79 @@
+{
+  "timestamp": "20250923_133702",
+  "model_format": "onnx",
+  "opset_version": 11,
+  "framework": "tensorflow_keras",
+  "optimal_sequence_length": 12,
+  "input_shape": [
+    null,
+    12,
+    1
+  ],
+  "models": [
+    "GRU"
+  ],
+  "onnx_available": true,
+  "models_config": {
+    "LSTM": {
+      "enabled": true,
+      "units": [
+        64,
+        32
+      ],
+      "dropout": 0.2,
+      "min_data_size": 50
+    },
+    "GRU": {
+      "enabled": true,
+      "units": [
+        64,
+        32
+      ],
+      "dropout": 0.2,
+      "min_data_size": 50
+    },
+    "CNN-LSTM": {
+      "enabled": true,
+      "filters": [
+        64,
+        32
+      ],
+      "kernel_size": 3,
+      "lstm_units": 50,
+      "min_data_size": 500
+    },
+    "Transformer": {
+      "enabled": true,
+      "num_heads": 4,
+      "key_dim": 32,
+      "ff_dim": 128,
+      "min_data_size": 1000
+    },
+    "Bidirectional-LSTM": {
+      "enabled": false,
+      "units": [
+        64,
+        32
+      ],
+      "dropout": 0.2,
+      "min_data_size": 300
+    },
+    "Dense": {
+      "enabled": false,
+      "units": [
+        128,
+        64,
+        32
+      ],
+      "dropout": 0.3,
+      "min_data_size": 50
+    }
+  },
+  "trained_models": [
+    "GRU"
+  ],
+  "conversion_config": {
+    "opset": 11,
+    "target_device": "cpu"
+  }
+}
