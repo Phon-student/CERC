@@ -5,3 +5,5 @@
 *.xlsx
 *.csv
 *.gpx
+*.json
+/DI_20002
