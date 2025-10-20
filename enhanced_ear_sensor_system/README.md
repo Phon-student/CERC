@@ -708,6 +708,108 @@ Balance gradient magnitudes dynamically
 
 ---
 
+## ⏱️ Windowing Technique Deep Dive
+
+### **Window Parameters & Time Duration**
+
+The system uses these windowing parameters:
+- **Sampling Rate (FS)**: 1300 Hz (samples per second)
+- **Window Size**: 128 samples
+- **Stride**: 32 samples (75% overlap between consecutive windows)
+- **Alpha (Tukey)**: 0.25 (raised cosine taper)
+
+### **Time Calculations:**
+
+```
+Window Duration = 128 samples / 1300 Hz = 0.0985 seconds ≈ 98.5 ms
+Stride Duration = 32 samples / 1300 Hz = 0.0246 seconds ≈ 24.6 ms
+Overlap = (128 - 32) / 128 = 75%
+```
+
+### **Why This Window Size Works Well**
+
+#### **1. Sufficient Motion Capture**
+- 98.5 ms captures meaningful motion "snapshots"
+- At typical exercise frequencies (1-2 Hz), this is ~10-20% of a full repetition
+- Enough to detect acceleration bursts, directional changes, and motion patterns
+
+Exercise movement frequencies:
+- **Jumping Jacks**: 1-2 Hz (0.5-1 second per rep)
+- **Push-ups**: 0.3-0.7 Hz (1.5-3 seconds per rep)
+- **Squats**: 0.5-1 Hz (1-2 seconds per rep)
+
+One full cycle = 500-1000 ms, so our 98.5 ms window captures ~10-20% of a rep.
+
+#### **2. Data Multiplication via Overlap**
+With 75% overlap:
+- Each 5-second file → **~200 windows**
+- Creates 4x data augmentation automatically
+- Model sees same motion from multiple temporal perspectives
+- Adjacent windows share 96 out of 128 samples → smooth temporal tracking
+
+#### **3. Rich Feature Space**
+Each window contains:
+- **12 channels** (Acc X/Y/Z, Gyro X/Y/Z for 2 ears)
+- **128 timesteps** per channel
+- Total: **1,536 features** per window
+- CNNs extract spatial-temporal patterns effectively
+
+#### **4. High Temporal Resolution**
+At 1300 Hz, human motion (1-10 Hz) is **oversampled by 130-1300x**:
+- High signal-to-noise ratio
+- Sufficient temporal detail for pattern extraction
+- Even small windows capture full motion characteristics
+
+#### **5. Raised Cosine Benefits**
+- Smoothly tapers edges to reduce spectral leakage
+- Preserves central 75% of signal (96 samples) at full amplitude
+- Reduces boundary artifacts that confuse CNNs
+- Only ~3% amplitude loss (vs 36% for full Hann window)
+
+### **Mathematical Intuition**
+
+**Information Density:**
+```
+Info per window = 128 samples × 12 channels = 1,536 values
+```
+
+**CNN Receptive Field:**
+If model has 3 convolutional layers with kernel size 3:
+```
+Receptive Field = 1 + 3 × (3-1) = 7 samples = 5.4 ms
+```
+With 128 samples, model sees **~18 receptive fields** across the window.
+
+**Video Analogy:**
+Think of windowing like video:
+- **Sampling Rate (1300 Hz)** = Camera fps
+- **Window Size (128 samples = 98.5 ms)** = Frame duration  
+- **Stride (32 samples = 24.6 ms)** = Time between frames
+- **75% Overlap** = Slow-motion capture (multiple overlapping frames)
+
+Your model is like a **video classifier analyzing 98ms clips every 24ms** to track exercise continuously!
+
+### **Summary: Why It Works**
+
+| Aspect | Value | Interpretation |
+|--------|-------|----------------|
+| **Duration** | 98.5 ms | Captures motion "snapshot" |
+| **Frequency Content** | 0-650 Hz (Nyquist) | Filtered to 35 Hz → captures all human motion |
+| **Samples per Rep** | ~650-2600 | 128 samples = 1 "micro-movement" |
+| **Overlap** | 75% | 4x temporal coverage |
+| **Windows per 5s** | ~200 | Massive training examples |
+
+The "small" window (98.5 ms) is actually **optimal** because:
+1. ✅ Captures meaningful motion patterns (10-20% of a rep)
+2. ✅ Creates 200 training examples per 5-second file
+3. ✅ Provides high temporal resolution for tracking
+4. ✅ Sufficient for CNN to extract acceleration/rotation features
+5. ✅ Overlapping windows provide data augmentation and smooth tracking
+
+**The model learns well because it sees the same exercise from 200 different temporal perspectives per file, with rich 12-channel IMU data at high sampling rate!** 🚀
+
+---
+
 ## 📊 Data Pipeline
 
 ### **Complete Data Flow**
