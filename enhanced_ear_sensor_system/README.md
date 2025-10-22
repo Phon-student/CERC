@@ -12,6 +12,8 @@
 - [Usage & Deployment](#usage--deployment)
 - [File Structure](#file-structure)
 
+> 📘 **New:** See [AGGREGATION_STRATEGY.md](./AGGREGATION_STRATEGY.md) for detailed information on how we aggregate window predictions using **Soft Voting** for classification tasks.
+
 ---
 
 ## 🎯 Overview
