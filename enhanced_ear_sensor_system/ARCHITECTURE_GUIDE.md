@@ -275,15 +275,6 @@ Outputs:
 | Block 3 | 27 timesteps | Full motion context (21 ms) |
 | Attention | 27 timesteps | Focused important moments |
 
-### **Parameter Count:**
-
-| Component | Parameters | % of Total |
-|-----------|------------|------------|
-| Conv1D Blocks | ~78,000 | 80% |
-| Attention | ~8,000 | 13% |
-| Dense Layers | ~15,000 | 24% |
-| Task Heads | ~10,000 | 16% |
-| **Total** | **~62,000** | **100%** |
 
 ---
 
