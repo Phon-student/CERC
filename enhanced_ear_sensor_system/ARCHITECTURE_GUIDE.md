@@ -34,9 +34,6 @@ The Enhanced Ear Sensor System is a multi-task deep learning model that processe
 - **Input Channels:** 12 (6 IMU channels × 2 ears)
 - **Window Size:** 128 timesteps (98.5 ms @ 1300 Hz)
 - **Overlap:** 75% (stride = 32 timesteps)
-- **Model Parameters:** ~62,000
-- **Accuracy:** 89% (±1 rep), 95% exercise classification
-
 ---
 
 ## ⏱️ Windowing Technique Explained
