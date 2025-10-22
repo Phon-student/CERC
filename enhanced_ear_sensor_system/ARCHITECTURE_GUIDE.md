@@ -144,16 +144,15 @@ Examples: Acceleration spikes, gyro changes, vibration
 - Each filter produces one feature map
 
 **Mathematical Operation:**
-$$
+```math
 \text{output}[t, f] = \text{ReLU}\left(\sum_{k=0}^{2} \sum_{c=0}^{11} W[k, c, f] \cdot X[t+k, c] + b[f]\right)
-$$
 
 Where:
-- $t$ = timestep index
-- $f$ = filter index (0 to 15)
-- $k$ = kernel position (0, 1, 2)
-- $c$ = channel index (0 to 11)
-
+- t = timestep index
+- f = filter index (0 to 15)
+- k = kernel position (0, 1, 2)
+- c = channel index (0 to 11)
+```
 #### **3. Conv1D Block 2 (Mid-Level Features)**
 ```python
 Conv1D(32, kernel_size=5) → BatchNorm → Dropout(0.3)
@@ -383,9 +382,9 @@ final_category = "Fair" (majority vote)
 ### **2. Law of Large Numbers**
 
 **Statistical Principle:**
-$
+```math
 \text{Standard Error} = \frac{\sigma}{\sqrt{n}}
-$
+```
 
 **Example:**
 ```
@@ -825,9 +824,9 @@ mean = 11.95 ≈ 12.0 ✅
 #### **1. Law of Large Numbers**
 
 **Statistical Formula:**
-$
+```math
 \text{Error of Mean} = \frac{\sigma}{\sqrt{n}}
-$
+```
 
 **Example:**
 ```
