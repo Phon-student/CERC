@@ -383,9 +383,9 @@ final_category = "Fair" (majority vote)
 ### **2. Law of Large Numbers**
 
 **Statistical Principle:**
-$$
+$
 \text{Standard Error} = \frac{\sigma}{\sqrt{n}}
-$$
+$
 
 **Example:**
 ```
@@ -825,9 +825,9 @@ mean = 11.95 ≈ 12.0 ✅
 #### **1. Law of Large Numbers**
 
 **Statistical Formula:**
-$$
+$
 \text{Error of Mean} = \frac{\sigma}{\sqrt{n}}
-$$
+$
 
 **Example:**
 ```
