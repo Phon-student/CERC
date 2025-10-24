@@ -9,10 +9,13 @@
 - [Training Strategy](#training-strategy)
 - [Results & Performance](#results--performance)
 - [Comparison: Deep Learning vs Random Forest](#comparison-deep-learning-vs-random-forest)
+- [Model Interpretability](#model-interpretability) ⭐ **NEW**
 - [Usage & Deployment](#usage--deployment)
 - [File Structure](#file-structure)
 
 > 📘 **New:** See [AGGREGATION_STRATEGY.md](./AGGREGATION_STRATEGY.md) for detailed information on how we aggregate window predictions using **Soft Voting** for classification tasks.
+
+> 🔍 **New:** See [MODEL_INTERPRETABILITY_GUIDE.md](./MODEL_INTERPRETABILITY_GUIDE.md) for comprehensive analysis tools to understand what each model block learns!
 
 ---
 
@@ -3028,7 +3031,75 @@ Outputs (dictionary):
 
 ---
 
-## 📚 References & Methodology
+## � Model Interpretability
+
+### Understanding What Your Model Learns
+
+MAESTRO includes **7 comprehensive interpretability analysis cells** that help you understand what each block of the model focuses on.
+
+#### 📊 Available Analyses:
+
+1. **🎨 Convolutional Feature Maps**
+   - Visualizes what patterns each Conv1D layer detects
+   - Shows feature evolution through the network
+   - Output: `conv_feature_maps_analysis.png`
+
+2. **🎯 Attention Patterns**
+   - Reveals which timesteps the model focuses on
+   - Identifies exercise-discriminative moments
+   - Output: `attention_temporal_importance.png`
+
+3. **📡 Sensor Channel Importance**
+   - Identifies which IMU sensors are most critical
+   - Compares left vs right ear, accel vs gyro
+   - Output: `sensor_channel_importance.png`
+
+4. **🌌 Embedding Space Visualization**
+   - 2D projection of exercise embeddings (PCA & t-SNE)
+   - Shows exercise separation and clustering quality
+   - Output: `embedding_space_visualization.png`
+
+5. **📈 Layer-wise Activation Statistics**
+   - Analyzes layer health, sparsity, and efficiency
+   - Identifies dead or saturated layers
+   - Output: `layer_activation_statistics.png`
+
+6. **🎯 Exercise-Specific Filter Responses**
+   - Shows which filters specialize on which exercises
+   - Reveals filter specialization vs generalization
+   - Output: `exercise_specific_filters.png`
+
+#### 📚 Documentation:
+
+- **[MODEL_INTERPRETABILITY_GUIDE.md](./MODEL_INTERPRETABILITY_GUIDE.md)** - Comprehensive guide with interpretation rules and troubleshooting
+- **[INTERPRETABILITY_QUICK_REFERENCE.md](./INTERPRETABILITY_QUICK_REFERENCE.md)** - Quick reference card for common patterns and fixes
+
+#### 🚀 How to Use:
+
+```python
+# After training your model, run the interpretability cells
+# They will generate 6 visualization plots and provide:
+# ✅ What each layer learns
+# ✅ Which sensors are important
+# ✅ How attention focuses
+# ✅ Exercise separation quality
+# ✅ Filter specialization analysis
+# ✅ Actionable improvement suggestions
+```
+
+#### 🎯 Key Questions Answered:
+
+- Does the first Conv block focus on high-frequency details?
+- Do later blocks capture exercise-specific patterns?
+- Which attention heads focus on which exercise types?
+- Are left and right ear sensors equally important?
+- Can we remove any sensors without losing accuracy?
+- Is the embedding space well-separated?
+- Are filters specialized or general-purpose?
+
+---
+
+## �📚 References & Methodology
 
 ### **Key Techniques**
 
