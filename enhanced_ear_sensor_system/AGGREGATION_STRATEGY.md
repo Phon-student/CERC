@@ -213,7 +213,7 @@ def aggregate_window_predictions(predictions, scalers):
 
 ## 📊 Performance Comparison
 
-### Soft Voting vs Hard Voting (Tested on 500 files)
+### Soft Voting vs Hard Voting (Tested on 50 files)
 
 | Metric | Hard Voting | Soft Voting | Improvement |
 |--------|------------|-------------|-------------|
